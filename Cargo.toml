@@ -1,0 +1,21 @@
+[package]
+name = "kiho-worktime"
+version = "1.0.0"
+edition = "2021"
+
+# https://github.com/johnthagen/min-sized-rust
+[profile.release]
+strip = true    # Automatically strip symbols from the binary. (14.8 -> 4.1 MiB)
+opt-level = "z" # Optimize for size.                           ( 4.1 -> 3.6 MiB)
+lto = true      #                                              ( 3.6 -> 2.2 MiB)
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+chrono = "0.4.26"
+clap = { version = "4.3.22", features = ["derive"] }
+confy = "0.5.1"
+reqwest = { version = "0.11.19", features = ["blocking", "json", "gzip"] }
+serde = "1.0.183"
+serde_derive = "1.0.183"
+serde_json = "1.0.105"
