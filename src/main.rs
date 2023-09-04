@@ -15,6 +15,10 @@ extern crate serde_derive;
 #[macro_use]
 extern crate serde_json;
 
+// For getting user input:
+use std::io;
+use std::io::Write;
+
 use chrono::prelude::*;
 
 
@@ -71,10 +75,12 @@ enum CliCommands {
 
 #[derive(Subcommand)]
 enum CliGetWhat {
-    /// Get current configuration
+    /// Get current loaded configuration
     Config,
     /// Get 'customer cost centers' that are available in configuration
     CCC,
+    /// Get list of configured 'recurring tasks'
+    Tasks,
     /// Print example login/logout JSONs
     JSON,
     /// Get latest COUNT worktime BREAK/LOGIN/LOGOUT punch lines
@@ -91,11 +97,14 @@ enum CliGetWhat {
 #[derive(Args, Clone)]
 struct PunchDesc {
     #[arg(value_name = "description")]
-    desc: String,
+    desc: Option<String>,
 }
 impl std::fmt::Display for PunchDesc {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.desc)
+        match &self.desc {
+            None       => panic!("ERROR: Punch description cannot be empty!"),
+            Some(desc) => write!(f, "{}", desc),
+        }
     }
 }
 
@@ -121,7 +130,10 @@ struct KihoWtConfig {
     title:   String,
     api_key: String,
     updated: String,
-    // Note that `confy` supports ONLY `String` keys on HashMaps b/c HashMaps are mapped into TOML sections
+    // NOTE
+    // - Putting `recurring_tasks` after `cost_centres` result in `SerializeTomlError(ValueAfterTable)` error :/
+    // - HashMap KEY has to be also `String` b/c TOML keys are always interpreted as strings.
+    recurring_tasks: Vec<String>,
     cost_centres: std::collections::HashMap<String,String>,
 }
 impl Default for KihoWtConfig {
@@ -133,6 +145,9 @@ impl Default for KihoWtConfig {
             cost_centres: std::collections::HashMap::from([
                 (String::from("000000"), String::from("Dummy example cost centre")),
             ]),
+            recurring_tasks: vec![
+                String::from("Dummy example recurring task description"),
+            ],
         }
     }
 }
@@ -141,14 +156,43 @@ fn load_config() -> KihoWtConfig {
     let cfg_name = CONFIG_NAME;
     let cfg_path = confy::get_configuration_file_path(cfg_name, None)
         .expect("Getting confy configuration file path failed");
-    let cfg: KihoWtConfig = confy::load(cfg_name, None).unwrap_or_else(|_|
-        panic!("ERROR: Loading configuration from '{}' failed!", cfg_path.display())
-    );
+    let cfg: KihoWtConfig = confy::load(cfg_name, None).unwrap_or_else(|err| {
+        println!("ERROR: {:?}", err);
+        panic!("Loading configuration from '{}' failed!", cfg_path.display());
+    });
     cfg
 }
 
 fn print_config(cfg: KihoWtConfig) {
     println!("{:#?}", cfg); // Using `:#?` gives pretty-formatted JSON style output
+}
+
+
+fn ask_recurring_desc(tasks: Vec<String>) -> PunchDesc {
+    let tasks_cnt = tasks.len();
+    println!("{} :: No punch description given.\nPlease select one from the available recurring ones:", Local::now().format(STAMP_FORMAT));
+    for idx in 0..tasks_cnt {
+        println!("{:>4}: {}", (idx+1), tasks[idx]);
+    }
+
+    let mut user_choice = String::new();
+    let description: &String = loop {
+        user_choice.clear();
+        print!("Which task you want to start [1-{tasks_cnt}, or (c)ancel]? ");
+        io::stdout().flush().unwrap();
+        std::io::stdin().read_line(&mut user_choice)
+            .expect("Error reading user's choice");
+        user_choice = user_choice.trim().to_lowercase();
+        if user_choice == "c" {
+            println!("EXITING...");
+            std::process::exit(0);
+        }
+        match user_choice.parse::<usize>() {
+            Ok(idx) if idx > 0 && idx <= tasks_cnt => break &tasks[idx-1],
+            _                                      => continue,
+        };
+    };
+    PunchDesc { desc: Some(String::from(description)) }
 }
 
 
@@ -218,7 +262,6 @@ fn print_example_jsons() {
 }
 
 
-
 fn get_latest_punch(api_key: String, punch_type: Option<PunchType>, punch_count: u32) {
     println!("Starting HTTP GET request...");
     let mut params = vec![
@@ -272,6 +315,7 @@ fn get_latest_punch(api_key: String, punch_type: Option<PunchType>, punch_count:
     if punch_lines.len() == 0 {
         println!("NONE FOUND!");
     }
+    // TODO: Sort array in ascending order by timestamp so that the newest punch is the bottom most
     for pl in punch_lines {
         let punch_id   = &pl["id"];
         let punch_desc = &pl["description"].as_str().unwrap_or_else(|| "desc: N/A");
@@ -343,9 +387,10 @@ fn main() {
     let config = load_config();
     match &args.command {
         CliCommands::Get { what } => match what {
-            CliGetWhat::CCC    => println!("Available 'Customer Cost Centres': {:#?}", config.cost_centres),
-            CliGetWhat::Config => print_config(config),
-            CliGetWhat::JSON   => print_example_jsons(),
+            CliGetWhat::CCC     => println!("Available 'Customer Cost Centres': {:#?}", config.cost_centres),
+            CliGetWhat::Tasks   => println!("Available 'Recurring Tasks': {:#?}", config.recurring_tasks),
+            CliGetWhat::Config  => print_config(config),
+            CliGetWhat::JSON    => print_example_jsons(),
             CliGetWhat::Latest { cnt, typ } => get_latest_punch(config.api_key, *typ, *cnt),
         },
         CliCommands::Break => {
@@ -353,10 +398,14 @@ fn main() {
             let _json = create_punch_json(PunchType::BREAK, None, None);
         },
         CliCommands::Start(desc) => {
-            println!("{} :: Starting '{}'", Local::now().format(STAMP_FORMAT), desc);
+            let punch_desc = match &desc.desc {
+                None    => ask_recurring_desc(config.recurring_tasks),
+                Some(_) => desc.clone(),
+            };
+            println!("{} :: Starting '{}'", Local::now().format(STAMP_FORMAT), punch_desc);
             // TODO: Get latest worktime punch line and ERROR OUT if it is 'LOGIN'
             // TODO: List and ask cost centre
-            let json = create_punch_json(PunchType::LOGIN, Some(desc.clone()), None);
+            let json = create_punch_json(PunchType::LOGIN, Some(punch_desc), None);
             if !args.dry_run { http_punch_post(config.api_key, json) }
         },
         CliCommands::Stop => {
