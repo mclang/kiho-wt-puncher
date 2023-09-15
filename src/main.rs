@@ -19,7 +19,22 @@ extern crate serde_json;
 use std::io;
 use std::io::Write;
 
+// Arch should be used insted of Vec whenever handling long-lived immutable data.
+// But do NOT use 'Arc<String>' b/c getting the real value has overhead!
+// Please check https://youtu.be/A4cKi7PTJSs for a comparison
+// use std::sync::Arc;
+
 use chrono::prelude::*;
+
+// https://docs.rs/once_cell/latest/once_cell/
+use once_cell::sync::Lazy;
+static CLIARGS: Lazy<CliArgs> = Lazy::new(|| {
+    let args = CliArgs::parse();
+    if args.verbose > 0 {
+        println!("{} :: Parsing command line arguments (OnceCell/Lazy) done", Local::now().format(STAMP_FORMAT));
+    }
+    args
+});
 
 
 const APP_NAME:     &str = "Kiho Worktime Puncher";
@@ -132,7 +147,7 @@ struct KihoWtConfig {
     updated: String,
     // NOTE
     // - Putting `recurring_tasks` after `cost_centres` result in `SerializeTomlError(ValueAfterTable)` error :/
-    // - HashMap KEY has to be also `String` b/c TOML keys are always interpreted as strings.
+    // - HashMap KEY has to be also `String` b/c TOML keys are always interpreted as strings (i.e cannot be `&str`).
     recurring_tasks: Vec<String>,
     cost_centres: std::collections::HashMap<String,String>,
 }
@@ -156,15 +171,14 @@ fn load_config() -> KihoWtConfig {
     let cfg_name = CONFIG_NAME;
     let cfg_path = confy::get_configuration_file_path(cfg_name, None)
         .expect("Getting confy configuration file path failed");
+    if CLIARGS.verbose > 0 {
+        println!("{} :: Loading configuration from '{}'", Local::now().format(STAMP_FORMAT), cfg_path.display());
+    }
     let cfg: KihoWtConfig = confy::load(cfg_name, None).unwrap_or_else(|err| {
         println!("ERROR: {:?}", err);
         panic!("Loading configuration from '{}' failed!", cfg_path.display());
     });
     cfg
-}
-
-fn print_config(cfg: KihoWtConfig) {
-    println!("{:#?}", cfg); // Using `:#?` gives pretty-formatted JSON style output
 }
 
 
@@ -262,8 +276,9 @@ fn print_example_jsons() {
 }
 
 
+// TODO: Replace 'String' parameters with '&str' ?
 fn get_latest_punch(api_key: String, punch_type: Option<PunchType>, punch_count: u32) {
-    println!("Starting HTTP GET request...");
+    println!("{} :: Starting HTTP GET request...", Local::now().format(STAMP_FORMAT));
     let mut params = vec![
         // ("mode",  String::from("latest")),           // Returns SINGLE `result` object instead of an ARRAY :/
         ("orderBy",  String::from("timestamp DESC")),   // NOTE: Nowadays `+` means SPACE in URLs like `%20` used to be !
@@ -289,18 +304,21 @@ fn get_latest_punch(api_key: String, punch_type: Option<PunchType>, punch_count:
         .header(reqwest::header::USER_AGENT, USER_AGENT);
         // .version(reqwest::Version::HTTP_2);
     // TODO: Verbosity check for ALL
-    println!("URL: {}", KIHO_API_URL);
+    println!("{} :: URL: {}", Local::now().format(STAMP_FORMAT), KIHO_API_URL);
     // println!("Query parameters:");
     // for (k,v) in params {
     //     println!("{k:>10}={v}")
     // }
     // println!("{:#?}", client);
-    // TODO: Check for `dry-run`
+    if CLIARGS.dry_run {
+        println!("{} :: DRY RUN - Skipping HTTP GET and response prosessing!", Local::now().format(STAMP_FORMAT));
+        return;
+    }
     let resp = client
         .send()
         .expect("FAILED TO MAKE HTTP GET");
     // TODO: `match resp.status()`...
-    println!("HTTP response: {}", resp.status());
+    println!("{} :: HTTP response: {}", Local::now().format(STAMP_FORMAT), resp.status());
     // TODO: Verbosity check for BOTH
     // println!("{:#?}", resp.headers());
     // println!("{:#?}", resp);
@@ -311,7 +329,7 @@ fn get_latest_punch(api_key: String, punch_type: Option<PunchType>, punch_count:
     // println!("{:#}", json);
     let punch_lines = json["result"].as_array()
         .expect("FAILED TO PARSE `result` FROM THE RETURNED JSON");
-    println!("\n{}:", punch_list_header);
+    println!("{} :: {}:", Local::now().format(STAMP_FORMAT), punch_list_header);
     if punch_lines.len() == 0 {
         println!("NONE FOUND!");
     }
@@ -326,8 +344,9 @@ fn get_latest_punch(api_key: String, punch_type: Option<PunchType>, punch_count:
 }
 
 
+// TODO: Replace 'String' parameters with '&str' ?
 fn http_punch_post(api_key: String, json_body: serde_json::Value) {
-    println!("Starting HTTP POST request...");
+    println!("{} :: Starting HTTP POST request...", Local::now().format(STAMP_FORMAT));
     // TODO: Global cacheable client with default headers
     let client = reqwest::blocking::Client::new()
         .post(KIHO_API_URL)
@@ -338,14 +357,17 @@ fn http_punch_post(api_key: String, json_body: serde_json::Value) {
         .header(reqwest::header::USER_AGENT, USER_AGENT);
         // .version(reqwest::Version::HTTP_2);
     // TODO: Verbosity check for BOTH
-    println!("URL: {}", KIHO_API_URL);
+    println!("{} :: URL: {}", Local::now().format(STAMP_FORMAT), KIHO_API_URL);
     // println!("{:#?}", client);
-    // TODO: Check for `dry-run`
+    if CLIARGS.dry_run {
+        println!("{} :: DRY RUN - Skipping HTTP POST and response prosessing!", Local::now().format(STAMP_FORMAT));
+        return;
+    }
     let resp = client
         .send()
         .expect("FAILED TO MAKE HTTP POST");
     // TODO: `match resp.status()`...
-    println!("HTTP response: {}", resp.status());
+    println!("{} :: HTTP response: {}", Local::now().format(STAMP_FORMAT), resp.status());
     // TODO: Verbosity check for BOTH
     // println!("{:#?}", resp.headers());
     // println!("{:#?}", resp);
@@ -359,7 +381,7 @@ fn http_punch_post(api_key: String, json_body: serde_json::Value) {
     let punch_time = &json["result"]["timestamp"].as_str().unwrap_or_else(||   "time: N/A");
     let punch_type = &json["result"]["type"].as_str().unwrap_or_else(||        "type: N/A");
     // TODO: Looks too much like normal log line
-    println!("\nNew punch line created:");
+    println!("{} :: New punch line created:", Local::now().format(STAMP_FORMAT));
     println!("{punch_time} {punch_type:<6} [id: {punch_id}] {punch_desc}");
 }
 
@@ -370,26 +392,24 @@ fn main() {
     println!("+{:-<1$}+", "", header.len());
     println!("|{}|", header);
     println!("+{:-<1$}+", "", header.len());
-    let args = CliArgs::parse();
-    if args.verbose > 0 {
+    let config = load_config();
+    if CLIARGS.verbose > 0 {
         println!("API URL:     {}", KIHO_API_URL);
         println!("Config path: {}", confy::get_configuration_file_path(CONFIG_NAME, None)
                  .expect("Getting configuration file path failed").display());
-        println!("Dry-run:     {}", args.dry_run);
-        println!("Verbosity:   {}", args.verbose);
+        println!("Dry-run:     {}", CLIARGS.dry_run);
+        println!("Verbosity:   {}", CLIARGS.verbose);
         println!("Start time:  {}", time_start.format(STAMP_FORMAT));
-        println!();
-        println!("{} :: Loading default configuration", Local::now().format(STAMP_FORMAT));
     }
-    if args.dry_run && args.verbose == 0 {
+    if CLIARGS.dry_run && CLIARGS.verbose == 0 {
         println!("NOTE: This is a DRY-RUN!");
     }
-    let config = load_config();
-    match &args.command {
+    match &CLIARGS.command {
         CliCommands::Get { what } => match what {
+            // Using `:#?` gives pretty-formatted (debug) output
             CliGetWhat::CCC     => println!("Available 'Customer Cost Centres': {:#?}", config.cost_centres),
             CliGetWhat::Tasks   => println!("Available 'Recurring Tasks': {:#?}", config.recurring_tasks),
-            CliGetWhat::Config  => print_config(config),
+            CliGetWhat::Config  => println!("Current WHOLE config: {:#?}", config),
             CliGetWhat::JSON    => print_example_jsons(),
             CliGetWhat::Latest { cnt, typ } => get_latest_punch(config.api_key, *typ, *cnt),
         },
@@ -403,20 +423,20 @@ fn main() {
                 Some(_) => desc.clone(),
             };
             println!("{} :: Starting '{}'", Local::now().format(STAMP_FORMAT), punch_desc);
-            // TODO: Get latest worktime punch line and ERROR OUT if it is 'LOGIN'
+            // TODO: Get latest worktime punch line and ERROR OUT if it is 'LOGIN' - OR make LOGOUT punch before LOGIN?
             // TODO: List and ask cost centre
             let json = create_punch_json(PunchType::LOGIN, Some(punch_desc), None);
-            if !args.dry_run { http_punch_post(config.api_key, json) }
+            http_punch_post(config.api_key, json);
         },
         CliCommands::Stop => {
             // TODO: Get latest worktime description and error out if it is NOT of type 'LOGIN'
             println!("{} :: Stopping worktime", Local::now().format(STAMP_FORMAT));
             let json = create_punch_json(PunchType::LOGOUT, None, None);
-            if !args.dry_run { http_punch_post(config.api_key, json) }
+            http_punch_post(config.api_key, json);
         },
     }
 
-    if args.verbose > 0 {
+    if CLIARGS.verbose > 0 {
         let time_stop = Local::now();
         println!("");
         println!("Stop time: {}", time_stop.format(STAMP_FORMAT));
