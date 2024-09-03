@@ -19,7 +19,7 @@ extern crate serde_json;
 use std::io;
 use std::io::Write;
 
-// Arch should be used insted of Vec whenever handling long-lived immutable data.
+// Arch should be used instead of Vec whenever handling long-lived immutable data.
 // But do NOT use 'Arc<String>' b/c getting the real value has overhead!
 // Please check https://youtu.be/A4cKi7PTJSs for a comparison
 // use std::sync::Arc;
@@ -236,8 +236,9 @@ fn create_punch_json(punch_type: PunchType, punch_desc: Option<PunchDesc>, _cc_i
             })
         },
     };
-    // TODO: Verbosity check
-    // println!("PUNCH JSON: {:#}", json); // Using `:#` gives pretty-formated JSON output
+    if CLIARGS.verbose > 0 {
+        println!("CREATED PUNCH JSON:\n{:#}", json); // Using `:#` gives pretty-formated JSON output
+    }
     json
 }
 
@@ -303,13 +304,14 @@ fn get_latest_punch(api_key: String, punch_type: Option<PunchType>, punch_count:
         .header(reqwest::header::ACCEPT, "application/json")
         .header(reqwest::header::USER_AGENT, USER_AGENT);
         // .version(reqwest::Version::HTTP_2);
-    // TODO: Verbosity check for ALL
-    println!("{} :: URL: {}", Local::now().format(STAMP_FORMAT), KIHO_API_URL);
-    // println!("Query parameters:");
-    // for (k,v) in params {
-    //     println!("{k:>10}={v}")
-    // }
-    // println!("{:#?}", client);
+    if CLIARGS.verbose > 1 {
+        println!("PUNCH GET REQUEST CLIENT:");
+        println!("{:#?}", client);
+        println!("PUNCH GET QUERY PARAMS:");
+        for (k,v) in params {
+            println!("{k:>10}={v}")
+        }
+    }
     if CLIARGS.dry_run {
         println!("{} :: DRY RUN - Skipping HTTP GET and response prosessing!", Local::now().format(STAMP_FORMAT));
         return;
@@ -319,14 +321,18 @@ fn get_latest_punch(api_key: String, punch_type: Option<PunchType>, punch_count:
         .expect("FAILED TO MAKE HTTP GET");
     // TODO: `match resp.status()`...
     println!("{} :: HTTP response: {}", Local::now().format(STAMP_FORMAT), resp.status());
-    // TODO: Verbosity check for BOTH
-    // println!("{:#?}", resp.headers());
-    // println!("{:#?}", resp);
+    if CLIARGS.verbose > 1 {
+        println!("PUNCH GET RESPONSE HEADERS:");
+        println!("{:#?}", resp.headers());
+        println!("{:#?}", resp);
+    }
     let json: serde_json::Value = resp
         .json()
         .expect("FAILED TO PARSE JSON RESPONSE");
-    // TODO: Verbosity check
-    // println!("{:#}", json);
+    if CLIARGS.verbose > 0 {
+        println!("PUNCH GET RESPONSE JSON:");
+        println!("{:#}", json);
+    }
     let punch_lines = json["result"].as_array()
         .expect("FAILED TO PARSE `result` FROM THE RETURNED JSON");
     println!("{} :: {}:", Local::now().format(STAMP_FORMAT), punch_list_header);
@@ -356,9 +362,10 @@ fn http_punch_post(api_key: String, json_body: serde_json::Value) {
         .header(reqwest::header::ACCEPT, "application/json")
         .header(reqwest::header::USER_AGENT, USER_AGENT);
         // .version(reqwest::Version::HTTP_2);
-    // TODO: Verbosity check for BOTH
-    println!("{} :: URL: {}", Local::now().format(STAMP_FORMAT), KIHO_API_URL);
-    // println!("{:#?}", client);
+    if CLIARGS.verbose > 1 {
+        println!("PUNCH POST REQUEST CLIENT:");
+        println!("{:#?}", client);
+    }
     if CLIARGS.dry_run {
         println!("{} :: DRY RUN - Skipping HTTP POST and response prosessing!", Local::now().format(STAMP_FORMAT));
         return;
@@ -368,14 +375,18 @@ fn http_punch_post(api_key: String, json_body: serde_json::Value) {
         .expect("FAILED TO MAKE HTTP POST");
     // TODO: `match resp.status()`...
     println!("{} :: HTTP response: {}", Local::now().format(STAMP_FORMAT), resp.status());
-    // TODO: Verbosity check for BOTH
-    // println!("{:#?}", resp.headers());
-    // println!("{:#?}", resp);
+    if CLIARGS.verbose > 1 {
+        println!("PUNCH POST RESPONSE HEADERS:");
+        println!("{:#?}", resp.headers());
+        println!("{:#?}", resp);
+    }
     let json: serde_json::Value = resp
         .json()
         .expect("FAILED TO PARSE JSON RESPONSE");
-    // TODO: Verbosity check
-    // println!("{:#}", json);
+    if CLIARGS.verbose > 0 {
+        println!("PUNCH POST RESPONSE JSON:");
+        println!("{:#}", json);
+    }
     let punch_id   = &json["result"]["id"];
     let punch_desc = &json["result"]["description"].as_str().unwrap_or_else(|| "desc: N/A");
     let punch_time = &json["result"]["timestamp"].as_str().unwrap_or_else(||   "time: N/A");
@@ -415,7 +426,8 @@ fn main() {
         },
         CliCommands::Break => {
             println!("{} :: Starting a BREAK", Local::now().format(STAMP_FORMAT));
-            let _json = create_punch_json(PunchType::BREAK, None, None);
+            todo!("Ask break type");
+            // let _json = create_punch_json(PunchType::BREAK, None, None);
         },
         CliCommands::Start(desc) => {
             let punch_desc = match &desc.desc {
