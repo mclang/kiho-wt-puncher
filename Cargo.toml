@@ -14,9 +14,9 @@ lto = true      #                                              ( 3.6 -> 2.2 MiB)
 [dependencies]
 chrono = "0.4.26"
 clap = { version = "4.3.22", features = ["derive"] }
-confy = "0.5.1"
+confy = "0.6.1"
 once_cell = "1.18.0"
-reqwest = { version = "0.11.19", features = ["blocking", "json", "gzip"] }
+reqwest = { version = "0.12.7", features = ["blocking", "json", "gzip"] }
 serde = "1.0.183"
 serde_derive = "1.0.183"
 serde_json = "1.0.105"
