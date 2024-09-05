@@ -277,6 +277,37 @@ fn print_example_jsons() {
 }
 
 
+fn print_punch_lines(plines: &Vec<serde_json::Value>) {
+    // TODO: Calculate e.g 'Cost Centre Name' width dynamically and use named width parameter:
+    // https://doc.rust-lang.org/rust-by-example/hello/print.html
+    println!("| {: <19} | {: <6} | {: <8} | {: <20} | {: <20} |", "Punch Timestamp", "Type", "Punch ID", "Cost Centre Name", "Punch Description");
+    println!("|-{:-<19}-|-{:-<6}-|-{:-<8}-|-{:-<20}-|-{:-<20}-|", "", "", "", "", "");
+    // TODO: Sort punch lines in descending order BEFORE calling this function
+    for pl in plines.iter().rev() {
+        print_punch_line(&pl);
+    }
+}
+
+fn print_punch_line(pl: &serde_json::Value) {
+    let punch_id   = &pl["id"];
+    let punch_desc = &pl["description"].as_str().unwrap_or_else(||                "<n/a>");
+    let punch_time = &pl["timestamp"].as_str().unwrap_or_else(||                  "<n/a>");
+    let punch_type = &pl["type"].as_str().unwrap_or_else(||                       "<n/a>");
+    let ccc_name   = &pl["customerCostcentre"]["name"].as_str().unwrap_or_else(|| "<n/a>");
+
+    // Parse "2024-09-04T15:39:37+03:00" into normal "dd.mm.yyyy HH:MM:SS" format:
+    let chrono_dt: DateTime<FixedOffset> = punch_time.parse().unwrap();
+    let normal_dt = chrono_dt.format("%d.%m.%Y %H:%M:%S");
+
+    // Omit both Costcentre (name) and Description if the latter is not available:
+    let cccn_desc = match punch_desc.is_empty() || punch_desc.starts_with("<n/a>") {
+        false => format!(" {ccc_name:<20} | {punch_desc} |"),
+        true =>  String::new(),
+    };
+    println!("| {} | {:<6} | {} |{}", normal_dt, punch_type, punch_id, cccn_desc);
+}
+
+
 // TODO: Replace 'String' parameters with '&str' ?
 fn get_latest_punch(api_key: String, punch_type: Option<PunchType>, punch_count: u32) {
     println!("{} :: Starting HTTP GET request...", Local::now().format(STAMP_FORMAT));
@@ -287,11 +318,11 @@ fn get_latest_punch(api_key: String, punch_type: Option<PunchType>, punch_count:
     ];
     let punch_list_header = match punch_type {
         None     => {
-            format!("Latest {} worktime punch line(s)", punch_count)
+            format!("Latest {} worktime punch line(s) in descending order", punch_count)
         },
         Some(pt) => {
             params.push(("type", pt.to_string()));
-            format!("Latest {} worktime {} punch line(s)", punch_count, pt)
+            format!("Latest {} worktime {} punch line(s) in descending order", punch_count, pt)
         },
     };
     // TODO: Global cacheable client with default headers
@@ -338,15 +369,10 @@ fn get_latest_punch(api_key: String, punch_type: Option<PunchType>, punch_count:
     println!("{} :: {}:", Local::now().format(STAMP_FORMAT), punch_list_header);
     if punch_lines.len() == 0 {
         println!("NONE FOUND!");
+        return;
     }
-    // TODO: Sort array in ascending order by timestamp so that the newest punch is the bottom most
-    for pl in punch_lines {
-        let punch_id   = &pl["id"];
-        let punch_desc = &pl["description"].as_str().unwrap_or_else(|| "desc: N/A");
-        let punch_time = &pl["timestamp"].as_str().unwrap_or_else(||   "time: N/A");
-        let punch_type = &pl["type"].as_str().unwrap_or_else(||        "type: N/A");
-        println!("{punch_time} {punch_type:<6} [id: {punch_id}] {punch_desc}");
-    }
+    // TODO: Sort punch lines in descending order HERE
+    print_punch_lines(punch_lines);
 }
 
 
@@ -387,13 +413,9 @@ fn http_punch_post(api_key: String, json_body: serde_json::Value) {
         println!("PUNCH POST RESPONSE JSON:");
         println!("{:#}", json);
     }
-    let punch_id   = &json["result"]["id"];
-    let punch_desc = &json["result"]["description"].as_str().unwrap_or_else(|| "desc: N/A");
-    let punch_time = &json["result"]["timestamp"].as_str().unwrap_or_else(||   "time: N/A");
-    let punch_type = &json["result"]["type"].as_str().unwrap_or_else(||        "type: N/A");
-    // TODO: Looks too much like normal log line
-    println!("{} :: New punch line created:", Local::now().format(STAMP_FORMAT));
-    println!("{punch_time} {punch_type:<6} [id: {punch_id}] {punch_desc}");
+    // TODO: In case of 'LOGOUT', calculate time using previous 'LOGIN'?
+    println!("{} :: Following new punch line created:", Local::now().format(STAMP_FORMAT));
+    print_punch_line(&json["result"]);
 }
 
 
