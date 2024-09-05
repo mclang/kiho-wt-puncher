@@ -1,6 +1,8 @@
 [package]
 name = "kiho-worktime"
-version = "1.0.5"
+version = "1.1.0"
+
+# https://doc.rust-lang.org/edition-guide/introduction.html
 edition = "2021"
 
 # https://github.com/johnthagen/min-sized-rust

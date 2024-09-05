@@ -182,6 +182,15 @@ fn load_config() -> KihoWtConfig {
 }
 
 
+// TODO: List 'cost_centres' from the configuration and ask user
+// fn ask_costcentre(costcentres: std::collections::HashMap<String,String>) -> u32 {
+fn ask_costcentre(desc: &str) -> u32 {
+    match desc.contains("ISO27") {
+        true => 892621u32,  // 'ISO27001 2024'
+        _    => 901184u32,  // 'Tuotekehitys Yleinen'
+    }
+}
+
 fn ask_recurring_desc(tasks: Vec<String>) -> PunchDesc {
     let tasks_cnt = tasks.len();
     println!("{} :: No punch description given.\nPlease select one from the available recurring ones:", Local::now().format(STAMP_FORMAT));
@@ -210,17 +219,16 @@ fn ask_recurring_desc(tasks: Vec<String>) -> PunchDesc {
 }
 
 
-fn create_punch_json(punch_type: PunchType, punch_desc: Option<PunchDesc>, _cc_id: Option<u32>) -> serde_json::Value {
+fn create_punch_json(punch_type: PunchType, punch_desc: Option<PunchDesc>, ccc_id: Option<u32>) -> serde_json::Value {
     let timestamp: String = Local::now().format("%Y-%m-%dT%H:%M:%S%Z").to_string();
-    // TODO: Implement 'Customer Cost Centre' -block (struct?) if it is given
     let json = match punch_type {
         PunchType::BREAK => panic!("Starting a BREAK not supported!"),
         PunchType::LOGIN => {
             json!({
                 "newPunch": {
                     "type": punch_type.to_string(),
-                    "description": punch_desc.expect("START PUNCH HAS TO HAVE DESCRIPTION").to_string(),
-                    "customerCostcentre": null,
+                    "description": punch_desc.expect("JSON ERROR: Start punch has to have 'Description'").to_string(),
+                    "customerCostcentre": { "id": ccc_id.expect("JSON ERROR: Start punch has to have 'CustomerCostCentre' ID") },
                     "timestamp": timestamp,
                     "realTimestamp": timestamp
                 }
@@ -456,10 +464,11 @@ fn main() {
                 None    => ask_recurring_desc(config.recurring_tasks),
                 Some(_) => desc.clone(),
             };
-            println!("{} :: Starting '{}'", Local::now().format(STAMP_FORMAT), punch_desc);
+            // TODO: Finalize 'ask cost centre' functionality
+            let punch_ccc = ask_costcentre(punch_desc.to_string().as_str());
+            println!("{} :: Starting '{}' (ccc id: {})", Local::now().format(STAMP_FORMAT), punch_desc, punch_ccc);
             // TODO: Get latest worktime punch line and ERROR OUT if it is 'LOGIN' - OR make LOGOUT punch before LOGIN?
-            // TODO: List and ask cost centre
-            let json = create_punch_json(PunchType::LOGIN, Some(punch_desc), None);
+            let json = create_punch_json(PunchType::LOGIN, Some(punch_desc), Some(punch_ccc));
             http_punch_post(config.api_key, json);
         },
         CliCommands::Stop => {
