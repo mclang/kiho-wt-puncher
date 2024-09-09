@@ -285,34 +285,56 @@ fn print_example_jsons() {
 }
 
 
-fn print_punch_lines(plines: &Vec<serde_json::Value>) {
-    // TODO: Calculate e.g 'Cost Centre Name' width dynamically and use named width parameter:
+fn print_punch_lines_asc(plines: &Vec<serde_json::Value>) {
+    // Using `pl.get("description")` instead of `pl["description"]` is more idiomatic
+    // when dealing with `Option` values. Furthermore it does not blow up on your face.
+    let desc_width = plines.iter()
+        .filter_map(|pl| pl.get("description")
+            .and_then(|desc| desc.as_str())
+            .and_then(|desc| Some(desc.len()))
+        )
+        .max()
+        .unwrap_or(40);
+
+    // Using 'unstable' sort is normally faster than normal 'stable' sort
+    // - https://doc.rust-lang.org/std/primitive.slice.html#method.sort_unstable_by
+    let mut ascending = plines.clone();
+    ascending.sort_unstable_by(|pl1, pl2| {
+        let s1 = pl1.get("timestamp")
+            .and_then(|stamp| stamp.as_str())
+            .and_then(|stamp| DateTime::parse_from_rfc3339(stamp).ok());
+        let s2 = pl2.get("timestamp")
+            .and_then(|stamp| stamp.as_str())
+            .and_then(|stamp| DateTime::parse_from_rfc3339(stamp).ok());
+        s1.cmp(&s2)
+    });
+
     // https://doc.rust-lang.org/rust-by-example/hello/print.html
-    println!("| {: <19} | {: <6} | {: <8} | {: <20} | {: <20} |", "Punch Timestamp", "Type", "Punch ID", "Cost Centre Name", "Punch Description");
-    println!("|-{:-<19}-|-{:-<6}-|-{:-<8}-|-{:-<20}-|-{:-<20}-|", "", "", "", "", "");
-    // TODO: Sort punch lines in descending order BEFORE calling this function
-    for pl in plines.iter().rev() {
-        print_punch_line(&pl);
-    }
+    println!("| {: <19} | {: <6} | {: <8} | {: <20} | {: <desc_width$} |", "Punch Timestamp", "Type", "Punch ID", "Cost Centre Name", "Punch Description");
+    println!("|-{:-<19}-|-{:-<6}-|-{:-<8}-|-{:-<20}-|-{:-<desc_width$}-|", "", "", "", "", "");
+    ascending.into_iter().for_each(|pl|
+        print_punch_line(&pl, Some(desc_width))
+    );
+    println!("|-{:-<19}-|-{:-<6}-|-{:-<8}-|-{:-<20}-|-{:-<desc_width$}-|", "", "", "", "", "");
 }
 
-fn print_punch_line(pl: &serde_json::Value) {
+fn print_punch_line(pl: &serde_json::Value, desc_col_width: Option<usize>) {
     let punch_id   = &pl["id"];
-    let punch_desc = &pl["description"].as_str().unwrap_or_else(||                "<n/a>");
-    let punch_time = &pl["timestamp"].as_str().unwrap_or_else(||                  "<n/a>");
-    let punch_type = &pl["type"].as_str().unwrap_or_else(||                       "<n/a>");
-    let ccc_name   = &pl["customerCostcentre"]["name"].as_str().unwrap_or_else(|| "<n/a>");
+    let punch_desc = &pl["description"].as_str().unwrap_or_else(|| "");
+    let punch_time = &pl["timestamp"].as_str().unwrap_or_else(||   "");
+    let punch_type = &pl["type"].as_str().unwrap_or_else(||        "");
+    let ccc_name   = &pl["customerCostcentre"]["name"]
+        .as_str().unwrap_or_else(|| "");
+    let desc_width = match desc_col_width {
+        None    => punch_desc.len(),
+        Some(w) => w,
+    };
 
     // Parse "2024-09-04T15:39:37+03:00" into normal "dd.mm.yyyy HH:MM:SS" format:
     let chrono_dt: DateTime<FixedOffset> = punch_time.parse().unwrap();
     let normal_dt = chrono_dt.format("%d.%m.%Y %H:%M:%S");
 
-    // Omit both Costcentre (name) and Description if the latter is not available:
-    let cccn_desc = match punch_desc.is_empty() || punch_desc.starts_with("<n/a>") {
-        false => format!(" {ccc_name:<20} | {punch_desc} |"),
-        true =>  String::new(),
-    };
-    println!("| {} | {:<6} | {} |{}", normal_dt, punch_type, punch_id, cccn_desc);
+    println!("| {: <19} | {: <6} | {: <8} | {: <20} | {: <desc_width$} |", normal_dt, punch_type, punch_id, ccc_name, punch_desc);
 }
 
 
@@ -326,11 +348,11 @@ fn get_latest_punch(api_key: String, punch_type: Option<PunchType>, punch_count:
     ];
     let punch_list_header = match punch_type {
         None     => {
-            format!("Latest {} worktime punch line(s) in descending order", punch_count)
+            format!("Latest {} worktime punch line(s) in ascending order", punch_count)
         },
         Some(pt) => {
             params.push(("type", pt.to_string()));
-            format!("Latest {} worktime {} punch line(s) in descending order", punch_count, pt)
+            format!("Latest {} worktime {} punch line(s) in ascending order", punch_count, pt)
         },
     };
     // TODO: Global cacheable client with default headers
@@ -379,8 +401,7 @@ fn get_latest_punch(api_key: String, punch_type: Option<PunchType>, punch_count:
         println!("NONE FOUND!");
         return;
     }
-    // TODO: Sort punch lines in descending order HERE
-    print_punch_lines(punch_lines);
+    print_punch_lines_asc(punch_lines);
 }
 
 
@@ -423,7 +444,7 @@ fn http_punch_post(api_key: String, json_body: serde_json::Value) {
     }
     // TODO: In case of 'LOGOUT', calculate time using previous 'LOGIN'?
     println!("{} :: Following new punch line created:", Local::now().format(STAMP_FORMAT));
-    print_punch_line(&json["result"]);
+    print_punch_line(&json["result"], None);
 }
 
 
