@@ -18,11 +18,6 @@ $ kiho-worktime -dv stop
 $ kiho-worktime --help
 ```
 
-**TODO**
-- More sensible `verbosity` checking with better logging/printing.
-- Modularization.
-- Improved `String`/`^str` usage.
-- Print config path when default sample file is created.
 
 ## Rust Design Idioms and Patterns
 
