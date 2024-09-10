@@ -46,7 +46,7 @@ const STAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
 // Examples:
 //  https://v3.kiho.fi/api/v1/punch?mode=latest
 //  https://v3.kiho.fi/api/v1/punch?orderBy=timestamp+DESC&pageSize=10&type=LOGIN
-// TODO: Maybe `const_format` could be used to generate USER_AGENT with VERSION information?
+// TODO [#9]: Maybe `const_format` could be used to generate USER_AGENT with VERSION information?
 const KIHO_API_URL: &str = "https://v3.kiho.fi/api/v1/punch";
 const USER_AGENT:   &str = "Kiho Worktime Puncher/reqwest";
 
@@ -80,10 +80,8 @@ enum CliCommands {
     },
     /// Add worktime break (NOT IMPLEMENTED)
     Break,
-    // TODO: Throw an error if something has been started already
     /// Start working on something work related
     Start(PunchDesc),
-    // TODO: Throw an error if nothing has been started
     /// Stop whatever worktime task was active
     Stop,
 }
@@ -182,7 +180,7 @@ fn load_config() -> KihoWtConfig {
 }
 
 
-// TODO: List 'cost_centres' from the configuration and ask user
+// TODO [#11]: List 'cost_centres' from the configuration and ask user
 // fn ask_costcentre(costcentres: std::collections::HashMap<String,String>) -> u32 {
 fn ask_costcentre(desc: &str) -> u32 {
     match desc.contains("ISO27") {
@@ -338,7 +336,6 @@ fn print_punch_line(pl: &serde_json::Value, desc_col_width: Option<usize>) {
 }
 
 
-// TODO: Replace 'String' parameters with '&str' ?
 fn get_latest_punch(api_key: String, punch_type: Option<PunchType>, punch_count: u32) {
     println!("{} :: Starting HTTP GET request...", Local::now().format(STAMP_FORMAT));
     let mut params = vec![
@@ -355,8 +352,6 @@ fn get_latest_punch(api_key: String, punch_type: Option<PunchType>, punch_count:
             format!("Latest {} worktime {} punch line(s) in ascending order", punch_count, pt)
         },
     };
-    // TODO: Global cacheable client with default headers
-    // TODO: Use `ClientBuilder` and add `.gzip(true)`
     let client = reqwest::blocking::Client::new()
         .get(KIHO_API_URL)
         .query(&params)
@@ -380,7 +375,7 @@ fn get_latest_punch(api_key: String, punch_type: Option<PunchType>, punch_count:
     let resp = client
         .send()
         .expect("FAILED TO MAKE HTTP GET");
-    // TODO: `match resp.status()`...
+    // TODO [#12]: `match resp.status()`...
     println!("{} :: HTTP response: {}", Local::now().format(STAMP_FORMAT), resp.status());
     if CLIARGS.verbose > 1 {
         println!("PUNCH GET RESPONSE HEADERS:");
@@ -405,10 +400,8 @@ fn get_latest_punch(api_key: String, punch_type: Option<PunchType>, punch_count:
 }
 
 
-// TODO: Replace 'String' parameters with '&str' ?
 fn http_punch_post(api_key: String, json_body: serde_json::Value) {
     println!("{} :: Starting HTTP POST request...", Local::now().format(STAMP_FORMAT));
-    // TODO: Global cacheable client with default headers
     let client = reqwest::blocking::Client::new()
         .post(KIHO_API_URL)
         .json(&json_body)
@@ -428,7 +421,7 @@ fn http_punch_post(api_key: String, json_body: serde_json::Value) {
     let resp = client
         .send()
         .expect("FAILED TO MAKE HTTP POST");
-    // TODO: `match resp.status()`...
+    // TODO [#12]: `match resp.status()`...
     println!("{} :: HTTP response: {}", Local::now().format(STAMP_FORMAT), resp.status());
     if CLIARGS.verbose > 1 {
         println!("PUNCH POST RESPONSE HEADERS:");
@@ -442,7 +435,7 @@ fn http_punch_post(api_key: String, json_body: serde_json::Value) {
         println!("PUNCH POST RESPONSE JSON:");
         println!("{:#}", json);
     }
-    // TODO: In case of 'LOGOUT', calculate time using previous 'LOGIN'?
+    // TODO [#13]: In case of 'LOGOUT', calculate time using previous 'LOGIN'?
     println!("{} :: Following new punch line created:", Local::now().format(STAMP_FORMAT));
     print_punch_line(&json["result"], None);
 }
@@ -485,15 +478,14 @@ fn main() {
                 None    => ask_recurring_desc(config.recurring_tasks),
                 Some(_) => desc.clone(),
             };
-            // TODO: Finalize 'ask cost centre' functionality
             let punch_ccc = ask_costcentre(punch_desc.to_string().as_str());
             println!("{} :: Starting '{}' (ccc id: {})", Local::now().format(STAMP_FORMAT), punch_desc, punch_ccc);
-            // TODO: Get latest worktime punch line and ERROR OUT if it is 'LOGIN' - OR make LOGOUT punch before LOGIN?
+            // TODO [10]: Get latest worktime punch line and ERROR OUT if it is 'LOGIN' - OR make LOGOUT punch before LOGIN?
             let json = create_punch_json(PunchType::LOGIN, Some(punch_desc), Some(punch_ccc));
             http_punch_post(config.api_key, json);
         },
         CliCommands::Stop => {
-            // TODO: Get latest worktime description and error out if it is NOT of type 'LOGIN'
+            // TODO [10]: Get latest worktime description and error out if it is NOT of type 'LOGIN'
             println!("{} :: Stopping worktime", Local::now().format(STAMP_FORMAT));
             let json = create_punch_json(PunchType::LOGOUT, None, None);
             http_punch_post(config.api_key, json);
