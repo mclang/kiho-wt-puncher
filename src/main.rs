@@ -46,9 +46,12 @@ const STAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
 // Examples:
 //  https://v3.kiho.fi/api/v1/punch?mode=latest
 //  https://v3.kiho.fi/api/v1/punch?orderBy=timestamp+DESC&pageSize=10&type=LOGIN
-// TODO [#9]: Maybe `const_format` could be used to generate USER_AGENT with VERSION information?
 const KIHO_API_URL: &str = "https://v3.kiho.fi/api/v1/punch";
-const USER_AGENT:   &str = "Kiho Worktime Puncher/reqwest";
+
+// https://crates.io/crates/const_format/
+use const_format::concatcp;
+const USER_AGENT: &str = concatcp!(APP_NAME, " v", APP_VERSION);
+
 
 // https://docs.rs/crate/clap/latest
 // https://docs.rs/clap/latest/clap/_derive/_tutorial/index.html
@@ -106,6 +109,7 @@ enum CliGetWhat {
         typ: Option<PunchType>,
     },
 }
+
 
 #[derive(Args, Clone)]
 struct PunchDesc {
@@ -450,6 +454,7 @@ fn main() {
     let config = load_config();
     if CLIARGS.verbose > 0 {
         println!("API URL:     {}", KIHO_API_URL);
+        println!("USER AGENT:  {}", USER_AGENT);
         println!("Config path: {}", confy::get_configuration_file_path(CONFIG_NAME, None)
                  .expect("Getting configuration file path failed").display());
         println!("Dry-run:     {}", CLIARGS.dry_run);
