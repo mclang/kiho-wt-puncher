@@ -26,6 +26,10 @@ use std::io::Write;
 
 use chrono::prelude::*;
 
+// https://crates.io/crates/const_format/
+use const_format::concatcp;
+
+
 // https://docs.rs/once_cell/latest/once_cell/
 use once_cell::sync::Lazy;
 static CLIARGS: Lazy<CliArgs> = Lazy::new(|| {
@@ -37,20 +41,27 @@ static CLIARGS: Lazy<CliArgs> = Lazy::new(|| {
 });
 
 
-const APP_NAME:     &str = "Kiho Worktime Puncher";
-const CONFIG_NAME:  &str = "kiho-worktime-puncher";
-const APP_VERSION:  &str = env!("CARGO_PKG_VERSION");
-const STAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
+#[cfg(debug_assertions)]
+const APP_NAME:         &str = "Kiho Worktime Puncher (devel-build)";
+#[cfg(not(debug_assertions))]
+const APP_NAME:         &str = "Kiho Worktime Puncher";
+
+const APP_VERSION:      &str = env!("CARGO_PKG_VERSION");
+const CONFIG_BASE_PATH: &str = "kiho-worktime-puncher";
+
+#[cfg(debug_assertions)]
+const CONFIG_NAME:      &str = concatcp!("devel-build_v", APP_VERSION);
+#[cfg(not(debug_assertions))]
+const CONFIG_NAME:      &str = "config";
+
 
 // Documentation: http://developers.kiho.fi/api
 // Examples:
 //  https://v3.kiho.fi/api/v1/punch?mode=latest
 //  https://v3.kiho.fi/api/v1/punch?orderBy=timestamp+DESC&pageSize=10&type=LOGIN
 const KIHO_API_URL: &str = "https://v3.kiho.fi/api/v1/punch";
-
-// https://crates.io/crates/const_format/
-use const_format::concatcp;
-const USER_AGENT: &str = concatcp!(APP_NAME, " v", APP_VERSION);
+const USER_AGENT:   &str = concatcp!(APP_NAME, " v", APP_VERSION);
+const STAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
 
 
 // https://docs.rs/crate/clap/latest
@@ -170,13 +181,12 @@ impl Default for KihoWtConfig {
 }
 
 fn load_config() -> KihoWtConfig {
-    let cfg_name = CONFIG_NAME;
-    let cfg_path = confy::get_configuration_file_path(cfg_name, None)
+    let cfg_path = confy::get_configuration_file_path(CONFIG_BASE_PATH, CONFIG_NAME)
         .expect("Getting confy configuration file path failed");
     if CLIARGS.verbose > 0 {
         println!("{} :: Loading configuration from '{}'", Local::now().format(STAMP_FORMAT), cfg_path.display());
     }
-    let cfg: KihoWtConfig = confy::load(cfg_name, None).unwrap_or_else(|err| {
+    let cfg: KihoWtConfig = confy::load(CONFIG_BASE_PATH, CONFIG_NAME).unwrap_or_else(|err| {
         println!("ERROR: {:?}", err);
         panic!("Loading configuration from '{}' failed!", cfg_path.display());
     });
@@ -455,7 +465,7 @@ fn main() {
     if CLIARGS.verbose > 0 {
         println!("API URL:     {}", KIHO_API_URL);
         println!("USER AGENT:  {}", USER_AGENT);
-        println!("Config path: {}", confy::get_configuration_file_path(CONFIG_NAME, None)
+        println!("Config path: {}", confy::get_configuration_file_path(CONFIG_BASE_PATH, CONFIG_NAME)
                  .expect("Getting configuration file path failed").display());
         println!("Dry-run:     {}", CLIARGS.dry_run);
         println!("Verbosity:   {}", CLIARGS.verbose);
