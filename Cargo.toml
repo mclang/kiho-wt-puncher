@@ -1,6 +1,6 @@
 [package]
 name = "kiho-worktime"
-version = "1.1.2-1"
+version = "1.1.2-9"
 
 # https://doc.rust-lang.org/edition-guide/introduction.html
 edition = "2021"
