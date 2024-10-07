@@ -15,9 +15,8 @@ extern crate serde_derive;
 #[macro_use]
 extern crate serde_json;
 
-// For getting user input:
-use std::io;
-use std::io::Write;
+// All the std things, e.g for getting user input, writing files and collections used:
+use std::{io, io::Write, collections::BTreeMap};
 
 // Arch should be used instead of Vec whenever handling long-lived immutable data.
 // But do NOT use 'Arc<String>' b/c getting the real value has overhead!
@@ -62,6 +61,9 @@ const CONFIG_NAME:      &str = "config";
 const KIHO_API_URL: &str = "https://v3.kiho.fi/api/v1/punch";
 const USER_AGENT:   &str = concatcp!(APP_NAME, " v", APP_VERSION);
 const STAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
+
+// Group name for unclassified recurring tasks that needs to be sorted LAST:
+const UNCLASSIFIED: &str = "örkki-unclassified";
 
 
 // https://docs.rs/crate/clap/latest
@@ -160,7 +162,7 @@ struct KihoWtConfig {
     updated: String,
     // NOTE
     // - Putting `recurring_tasks` after `cost_centres` result in `SerializeTomlError(ValueAfterTable)` error :/
-    // - HashMap KEY has to be also `String` b/c TOML keys are always interpreted as strings (i.e cannot be `&str`).
+    // - HashMap KEY has to be also `String` b/c TOML keys are always interpreted as mutable strings (i.e cannot be `&str`).
     recurring_tasks: Vec<String>,
     cost_centres: std::collections::HashMap<String,String>,
 }
@@ -171,10 +173,15 @@ impl Default for KihoWtConfig {
             api_key: "Ask API Key from administrator".to_string(),
             updated: Local::now().format("%d.%m.%Y").to_string(),
             cost_centres: std::collections::HashMap::from([
-                (String::from("000000"), String::from("Dummy example cost centre")),
+                (String::from("000000"), String::from("Example default customer cost centre")),
             ]),
             recurring_tasks: vec![
-                String::from("Dummy example recurring task description"),
+                String::from("Group A | Dummy task A-1"),
+                String::from("Group A | Dummy task A-2"),
+                String::from("Group B | Dummy task B-1"),
+                String::from("Misc task description I"),
+                String::from("Misc task description II"),
+                String::from("Misc task description III"),
             ],
         }
     }
@@ -203,31 +210,126 @@ fn ask_costcentre(desc: &str) -> u32 {
     }
 }
 
-fn ask_recurring_desc(tasks: Vec<String>) -> PunchDesc {
-    let tasks_cnt = tasks.len();
-    println!("{} :: No punch description given.\nPlease select one from the available recurring ones:", Local::now().format(STAMP_FORMAT));
-    for idx in 0..tasks_cnt {
-        println!("{:>4}: {}", (idx+1), tasks[idx]);
-    }
+fn ask_recurring_desc<'a>(tasks: &'a [String]) -> PunchDesc {
+    // Some helper closures for minimizing duplication.
+    // First one needs some lifetime guarantees to make `rustc` happy!
+    let create_menuitem_tuple = |idx: usize, desc: &'a str| -> (String, &'a str) {
+        let menu_idx = (idx+1).to_string();
+        (menu_idx, desc)
+    };
+    let print_invalid = || {
+        println!("Invalid choice!");
+    };
+    let print_menuline = |key: &str, val: &str| {
+        println!("{:>4}: {}", key, val);
+    };
 
-    let mut user_choice = String::new();
-    let description: &String = loop {
+    println!("{} :: No punch description given!", Local::now().format(STAMP_FORMAT));
+    let grouped_tasks = group_task_descriptions(&tasks);
+    if CLIARGS.verbose > 0 {
+        println!("RECURRING TASKS AVAILABLE: {:#?}", tasks);
+        println!("RECURRING TASKS GROUPED: {:#?}", grouped_tasks);
+    }
+    println!("Please choose one from the following recurring ones:");
+
+    // Build (and display) an alphabetically sorted 'top level menu' where:
+    // * A-Z: Groups having the real task descriptions as sub-items.
+    // * 1-9: Unclassified, directly selectable task descriptions.
+    // NOTE: This top menu needs to printed out using `inspect`, otherwise number keys get sorted first!
+    let top_level_menu: BTreeMap<String, &str> = grouped_tasks.iter()
+        .enumerate()
+        .flat_map(|(idx, (group, descs))|
+            match *group {
+                UNCLASSIFIED => descs.iter()
+                    .enumerate()
+                    .map(|(idx, desc)| create_menuitem_tuple(idx, *desc))
+                    .collect::<Vec<_>>(),   // Collect into Vec of (String, &str) tuples
+                _ => {
+                    let chr = (idx as u8 + b'A') as char;
+                    if chr > 'Z' {
+                        panic!("ERROR: Too many groups - only letters A-Z are supported!");
+                    }
+                    vec![(chr.to_string() , *group)]
+                },
+            }
+        )
+        .inspect(|(key, val)| print_menuline(key, val))
+        .collect();                         // Collect iterator into BTreeMap<String, &str>
+
+    let mut current_group: Option<&str> = None;
+    let mut current_menu = top_level_menu;
+    let mut user_choice  = String::new();
+
+    let description: String = loop {
+        let last_chr = current_menu.keys()
+            .filter(|key| key.chars().next().map_or(false, |chr| chr.is_alphabetic()))
+            .last();
+        let last_num = current_menu.keys()
+            .filter_map(|key| key.parse::<usize>().ok())
+            .max();
+
+        print!("==> Select ");
+        match (last_chr, last_num) {
+            (Some(chr), Some(num)) => print!("group [A-{chr}] or description [1-{num}]"),
+            (Some(chr), None)      => print!("group [A-{chr}]"),
+            (None,      Some(num)) => print!("description [1-{num}]"),
+            _ => panic!("ERROR: Neither last letter nor last number could be determined!"),
+        };
+        print!(" (ctrl+c to cancel): ");
+
         user_choice.clear();
-        print!("Which task you want to start [1-{tasks_cnt}, or (c)ancel]? ");
         io::stdout().flush().unwrap();
         std::io::stdin().read_line(&mut user_choice)
-            .expect("Error reading user's choice");
-        user_choice = user_choice.trim().to_lowercase();
-        if user_choice == "c" {
-            println!("EXITING...");
-            std::process::exit(0);
-        }
-        match user_choice.parse::<usize>() {
-            Ok(idx) if idx > 0 && idx <= tasks_cnt => break &tasks[idx-1],
-            _                                      => continue,
+            .expect("ERROR: Could not read user input");
+
+        // Either descent into given group and re-create (and display) current
+        // menu again, or return the selected description from the loop.
+        match user_choice.trim() {
+            choice if choice.chars().all(char::is_alphabetic) => {
+                let key = choice.to_ascii_uppercase();
+                match current_menu.get(&key) {
+                    Some(group) => {
+                        current_group = Some(group);
+                        current_menu = grouped_tasks[group].iter()
+                            .enumerate()
+                            .map(|(idx, desc)| create_menuitem_tuple(idx, *desc))
+                            .inspect(|(key, val)| print_menuline(key, val))
+                            .collect();
+                    }
+                    _ => print_invalid(),
+                }
+            }
+            choice if choice.parse::<usize>().is_ok() => {
+                match (current_menu.get(choice), current_group) {
+                    (Some(desc), Some(group)) => break format!("{}: {}", group, desc),
+                    (Some(desc), None)        => break format!("{}",            desc),
+                    _ => print_invalid(),
+                }
+            }
+            _ => print_invalid(),
         };
     };
-    PunchDesc { desc: Some(String::from(description)) }
+    PunchDesc { desc: Some(description) }
+}
+
+
+fn group_task_descriptions(tasks: &[String]) -> BTreeMap<&str, Vec<&str>> {
+    tasks.iter()
+        .fold(BTreeMap::new(), |mut acc, task| {
+            match task.split_once("|") {            // Tries to split task description at the first occurrence
+                Some((group, desc)) => {
+                    acc.entry(group.trim())         // Tries to find the (mutable) entry for the key `group` in the BTreeMap
+                        .or_insert_with(Vec::new)   // Inserts new item using empty Vec if `group` not found
+                        .push(desc.trim());         // Adds description to the vector (either the existing one or the new one)
+                }
+                None => {
+                    acc.entry(UNCLASSIFIED)
+                        .or_insert_with(Vec::new)
+                        .push(task.trim());
+                }
+            }
+            acc                                     // Returns mutated BTreeMap
+        })
 }
 
 
@@ -347,6 +449,13 @@ fn print_punch_line(pl: &serde_json::Value, desc_col_width: Option<usize>) {
     let normal_dt = chrono_dt.format("%d.%m.%Y %H:%M:%S");
 
     println!("| {: <19} | {: <6} | {: <8} | {: <20} | {: <desc_width$} |", normal_dt, punch_type, punch_id, ccc_name, punch_desc);
+}
+
+
+// TODO [#4]: This is how `&Vec<T>` -> `&[T]` should be done:
+fn print_recurring_tasks(tasks: &[String]) {
+    let grouped = group_task_descriptions(&tasks);
+    println!("Available 'Recurring Tasks': {:#?}", grouped);
 }
 
 
@@ -478,7 +587,7 @@ fn main() {
         CliCommands::Get { what } => match what {
             // Using `:#?` gives pretty-formatted (debug) output
             CliGetWhat::CCC     => println!("Available 'Customer Cost Centres': {:#?}", config.cost_centres),
-            CliGetWhat::Tasks   => println!("Available 'Recurring Tasks': {:#?}", config.recurring_tasks),
+            CliGetWhat::Tasks   => print_recurring_tasks(&config.recurring_tasks),
             CliGetWhat::Config  => println!("Current WHOLE config: {:#?}", config),
             CliGetWhat::JSON    => print_example_jsons(),
             CliGetWhat::Latest { cnt, typ } => get_latest_punch(config.api_key, *typ, *cnt),
@@ -490,7 +599,7 @@ fn main() {
         },
         CliCommands::Start(desc) => {
             let punch_desc = match &desc.desc {
-                None    => ask_recurring_desc(config.recurring_tasks),
+                None    => ask_recurring_desc(&config.recurring_tasks),
                 Some(_) => desc.clone(),
             };
             let punch_ccc = ask_costcentre(punch_desc.to_string().as_str());
